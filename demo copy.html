@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <script type="text/javascript" src="./standalone/umd/vis-network.min.js"></script>
+    <script type="text/javascript" src="https://unpkg.com/alea@1.0.0/alea.js"></script>
+    <script src="./js/demo_nodes.js"></script>
+    <script src="./js/demo_edges.js"></script>
+    <script src="./js/demo_options.js"></script>
+    <script src="./js/demo_functions.js"></script>
+    <!-- <script src="./js/demo_events.js"></script> -->
+    <link rel="stylesheet" href="./css/index.css"></link>
+</head>
+<body>
+    <div id="mynetwork"></div>
+    <input type="button" onclick="addNode()" value="添加节点"> <br />
+    <!-- <input type="button" onclick="changeNode1()" value="改变节点一的颜色"> <br />
+    <input type="button" onclick="removeRandomNode()" value="删除随机节点"> <br />
+    <input type="button" onclick="changeOptions()" value="改变全局选项"><br /> -->
+    
+    <div id="loadingBar">
+        <div class="outerBorder">
+            <div id="text">0%</div>
+            <div id="border">
+                <div id="bar"></div>
+            </div>
+        </div>
+    </div>
+    <label>
+        Filter nodes
+        <select id='nodeFilterSelect'>
+            <option value=''>All characters</option>
+            <option value='kid'>kids</option>
+            <option value='adult'>adults</option>
+            <option value='male'>male</option>
+            <option value='female'>female</option>
+        </select>
+    </label>
+    
+    <label>
+        Filter edges
+        <div>
+            <label>
+                <input type='checkbox' name='edgesFilter' value='parent' checked></input>
+                Is <span style="color:green">parent</span> of
+            </label>
+        </div>
+        <div>
+            <label>
+                <input type='checkbox' name='edgesFilter' value='teacher' checked></input>
+                Is <span style="color:blue">teacher</span> of
+            </label>
+        </div>
+        <div>
+            <label>
+                <input type='checkbox' name='edgesFilter' value='friend' checked></input>
+                Is <span style="color:red">friend</span> of
+            </label>
+        </div>
+    </label>
+
+    <script type="text/javascript">
+        
+        // // create an array with nodes
+        var nodes = new vis.DataSet(demoNodeviews)
+        // // create an array with edges
+        var edges = new vis.DataSet(demoEdgesviews);
+        const nodeFilterSelector = document.getElementById('nodeFilterSelect')
+        const edgeFilters = document.getElementsByName('edgesFilter')
+
+        var network,allNodes;
+        var highlightActive=false;
+        var lastClusterZoomLevel = 0;
+        var clusterIndex = 0;
+        var clusters = [];
+
+        function startNetwork(data) {
+            const container = document.getElementById('mynetwork')
+            // const options = {}
+            network=new vis.Network(container, data, demoOptions)
+            allNodes = nodes.get({returnType:"Object"});
+            network.on("stabilizationProgress", function(params) {
+                var maxWidth = 496;
+                var minWidth = 20;
+                var widthFactor = params.iterations/params.total;
+                var width = Math.max(minWidth,maxWidth * widthFactor);
+
+                document.getElementById('bar').style.width = width + 'px';
+                document.getElementById('text').innerHTML = Math.round(widthFactor*100) + '%';
+            });
+            network.once("stabilizationIterationsDone", function() {
+                document.getElementById('text').innerHTML = '100%';
+                document.getElementById('bar').style.width = '496px';
+                document.getElementById('loadingBar').style.opacity = 0;
+                // really clean the dom element
+                setTimeout(function () {document.getElementById('loadingBar').style.display = 'none';}, 500);
+            });
+            network.on("click",neighbourhoodHighlight);
+            
+            // set the first initial zoom level
+            network.once('initRedraw', function() {
+                if (lastClusterZoomLevel === 0) {
+                    lastClusterZoomLevel = network.getScale();
+                }
+            });
+            
+            // we use the zoom event for our clustering
+            network.on('zoom', function (params) {
+                if (params.direction == '-') {
+                    if (params.scale < lastClusterZoomLevel*0.9) {
+                        makeClusters(params.scale);
+                        lastClusterZoomLevel = params.scale;
+                    }
+                }
+                else {
+                    openClusters(params.scale);
+                }
+            });
+        }
+        function neighbourhoodHighlight(params){
+            console.log(params)
+            // if something is selected:
+            if (params.nodes.length > 0) {
+                highlightActive = true;
+                var i,j;
+                var selectedNode = params.nodes[0];
+                var degrees = 2;
+                console.log(allNodes)
+                // mark all nodes as hard to read.
+                for (var nodeId in allNodes) {
+                    allNodes[nodeId].color = 'rgba(200,200,200,0.5)';
+                    if (allNodes[nodeId].hiddenLabel === undefined) {
+                        allNodes[nodeId].hiddenLabel = allNodes[nodeId].label;
+                        allNodes[nodeId].label = undefined;
+                    }
+                }
+                var connectedNodes = network.getConnectedNodes(selectedNode);
+                var allConnectedNodes = [];
+
+                // get the second degree nodes
+                for (i = 1; i < degrees; i++) {
+                    for (j = 0; j < connectedNodes.length; j++) {
+                        allConnectedNodes = allConnectedNodes.concat(network.getConnectedNodes(connectedNodes[j]));
+                    }
+                }
+                console.log(allConnectedNodes)
+                // all second degree nodes get a different color and their label back
+                for (i = 0; i < allConnectedNodes.length; i++) {
+                    allNodes[allConnectedNodes[i]].color = 'rgba(150,150,150,0.75)';
+                    if (allNodes[allConnectedNodes[i]].hiddenLabel !== undefined) {
+                        allNodes[allConnectedNodes[i]].label = allNodes[allConnectedNodes[i]].hiddenLabel;
+                        allNodes[allConnectedNodes[i]].hiddenLabel = undefined;
+                    }
+                }
+
+                // all first degree nodes get their own color and their label back
+                for (i = 0; i < connectedNodes.length; i++) {
+                    allNodes[connectedNodes[i]].color = undefined;
+                    if (allNodes[connectedNodes[i]].hiddenLabel !== undefined) {
+                        allNodes[connectedNodes[i]].label = allNodes[connectedNodes[i]].hiddenLabel;
+                        allNodes[connectedNodes[i]].hiddenLabel = undefined;
+                    }
+                }
+
+                // the main node gets its own color and its label back.
+                allNodes[selectedNode].color = undefined;
+                if (allNodes[selectedNode].hiddenLabel !== undefined) {
+                    allNodes[selectedNode].label = allNodes[selectedNode].hiddenLabel;
+                    allNodes[selectedNode].hiddenLabel = undefined;
+                }
+            }
+            else if (highlightActive === true) {
+                // reset all nodes
+                for (var nodeId in allNodes) {
+                    allNodes[nodeId].color = undefined;
+                    if (allNodes[nodeId].hiddenLabel !== undefined) {
+                        allNodes[nodeId].label = allNodes[nodeId].hiddenLabel;
+                        allNodes[nodeId].hiddenLabel = undefined;
+                    }
+                }
+                highlightActive = false
+            }
+
+            // transform the object into an array
+            var updateArray = [];
+            for (nodeId in allNodes) {
+                if (allNodes.hasOwnProperty(nodeId)) {
+                    updateArray.push(allNodes[nodeId]);
+                }
+            }
+            nodes.update(updateArray);
+        }
+
+        let nodeFilterValue = ''
+        const edgesFilterValues = { friend: true, teacher: true, parent: true }
+        const nodesView = new vis.DataView(nodes, { filter: demoNodesFilter })
+        const edgesView = new vis.DataView(edges, { filter: demoEdgesFilter })
+        
+        nodeFilterSelector.addEventListener('change', (e) => {
+            // set new value to filter variable
+            nodeFilterValue = e.target.value
+            /*
+                refresh DataView,
+                so that its filter function is re-calculated with the new variable
+            */
+            nodesView.refresh()
+        })
+
+        edgeFilters.forEach(filter => filter.addEventListener('change', (e) => {
+            const { value, checked } = e.target
+            edgesFilterValues[value] = checked
+            edgesView.refresh()
+        }))
+
+        startNetwork({ nodes: nodesView, edges: edgesView })
+        
+        
+        // make the clusters
+        function makeClusters(scale) {
+            var clusterOptionsByData = {
+                processProperties: function (clusterOptions, childNodes) {
+                    clusterIndex = clusterIndex + 1;
+                    var childrenCount = 0;
+                    for (var i = 0; i < childNodes.length; i++) {
+                        childrenCount += childNodes[i].childrenCount || 1;
+                    }
+                    console.log(childrenCount)
+                    clusterOptions.childrenCount = childrenCount;
+                    clusterOptions.label = "# " + childrenCount + "";
+                    clusterOptions.font = {size: childrenCount*5+30}
+                    clusterOptions.id = 'cluster:' + clusterIndex;
+                    clusters.push({id:'cluster:' + clusterIndex, scale:scale});
+                    return clusterOptions;
+                },
+                clusterNodeProperties: {borderWidth: 3, shape: 'database', font: {size: 30}}
+            }
+            network.clusterOutliers(clusterOptionsByData);
+            // if (document.getElementById('stabilizeCheckbox').checked === true) {
+            //     // since we use the scale as a unique identifier, we do NOT want to fit after the stabilization
+            //     network.setOptions({physics:{stabilization:{fit: false}}});
+            //     network.stabilize();
+            // }
+        }
+
+        // open them back up!
+        function openClusters(scale) {
+            var newClusters = [];
+            var declustered = false;
+            for (var i = 0; i < clusters.length; i++) {
+                if (clusters[i].scale < scale) {
+                    network.openCluster(clusters[i].id);
+                    lastClusterZoomLevel = scale;
+                    declustered = true;
+                }
+                else {
+                    newClusters.push(clusters[i])
+                }
+            }
+            clusters = newClusters;
+            // if (declustered === true && document.getElementById('stabilizeCheckbox').checked === true) {
+            //     // since we use the scale as a unique identifier, we do NOT want to fit after the stabilization
+            //     network.setOptions({physics:{stabilization:{fit: false}}});
+            //     network.stabilize();
+            // }
+        }
+    </script>
+</body>
+</html>
